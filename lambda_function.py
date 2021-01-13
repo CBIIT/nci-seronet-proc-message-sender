@@ -20,6 +20,7 @@ def lambda_handler(event, context):
     password=ssm.get_parameter(Name="lambda_db_password", WithDecryption=True).get("Parameter").get("Value")
     job_table_name='table_file_remover'
     
+    
     http=urllib3.PoolManager()
     
     
@@ -29,8 +30,9 @@ def lambda_handler(event, context):
     
     #get the message from the event
     message = event['Records'][0]['Sns']['Message']
-    print(event)
+    #print(event)
     messageJson=eval(message)
+
     #if the message is passed by the filecopy function
     if(messageJson['previous_function']=='filecopy'):
         
@@ -90,7 +92,7 @@ def lambda_handler(event, context):
         #collect pass and fail files from the message
         content_pass=[]
         content_fail=[]
-        length=len(messageJson['validation_status_list'])-1
+        length=len(messageJson['validation_status_list'])
         for i in range(0,length):
             if messageJson['validation_status_list'][i]=="FILE_VALIDATION_SUCCESS":
                 content_pass.append(messageJson['full_name_list'][i])
