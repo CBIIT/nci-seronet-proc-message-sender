@@ -85,7 +85,7 @@ def lambda_handler(event, context):
         #file_name=sqlresult[1]
         file_name=messageJson['org_file_name']
         validation_date=messageJson['validation_date']
-        file_submitted_by=messageJson['file_submitted_by'][0:len(messageJson['file_submitted_by'])]
+        file_submitted_by=messageJson['file_submitted_by'][1:len(messageJson['file_submitted_by'])-1]
         file_status="processed"
         org_file_id=messageJson['org_file_id']
         
