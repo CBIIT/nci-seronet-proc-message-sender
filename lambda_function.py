@@ -1,140 +1,128 @@
-import boto3
 import json
 import logging
-from seronetCopyFiles import *
+import urllib3
+import boto3
 from seronetdBUtilities import *
-from seronetSnsMessagePublisher import *
-
-print('Loading function')
 
 # boto3 S3 initialization
 s3_client = boto3.client("s3")
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 ssm = boto3.client("ssm")
-sns = boto3.client('sns')
-
-
 
 
 
 def lambda_handler(event, context):
+  
+    host=ssm.get_parameter(Name="db_host", WithDecryption=True).get("Parameter").get("Value")
+    user=ssm.get_parameter(Name="lambda_db_username", WithDecryption=True).get("Parameter").get("Value")
+    dbname = ssm.get_parameter(Name="jobs_db_name", WithDecryption=True).get("Parameter").get("Value")
+    password=ssm.get_parameter(Name="lambda_db_password", WithDecryption=True).get("Parameter").get("Value")
+    job_table_name='table_file_remover'
+    
+    
+    http=urllib3.PoolManager()
+    
+    
+    #set up success and failure slack cahnnel
+    failure=ssm.get_parameter(Name="failure_hook_url", WithDecryption=True).get("Parameter").get("Value")
+    success=ssm.get_parameter(Name="success_hook_url", WithDecryption=True).get("Parameter").get("Value")
+    
+    #get the message from the event
+    message = event['Records'][0]['Sns']['Message']
+    #print(event)
+    messageJson=eval(message)
 
- try:
-  host=ssm.get_parameter(Name="db_host", WithDecryption=True).get("Parameter").get("Value")
-  user=ssm.get_parameter(Name="lambda_db_username", WithDecryption=True).get("Parameter").get("Value")
-  dbname = ssm.get_parameter(Name="jobs_db_name", WithDecryption=True).get("Parameter").get("Value")
-  password=ssm.get_parameter(Name="lambda_db_password", WithDecryption=True).get("Parameter").get("Value")
-  destination_bucket_name = ssm.get_parameter(Name="file_destination_bucket", WithDecryption=True).get("Parameter").get("Value")
-  job_table_name='table_file_remover'
-  
-  
-
-  
-  
-  #read the message from the event
-  message=event['Records'][0]['Sns']['Message']
-  #convert the message to json style
-  messageJson=json.loads(message)
-   
-  source_bucket_name =messageJson['bucketName']
-  
-  print('Source Bucket: '+source_bucket_name)
-  message=event['Records'][0]['Sns']['Message']
-  #convert the message to json style
-  messageJson=json.loads(message)
-  source_bucket_name =messageJson['bucketName']
-    
-      # determining which cbc bucket the file came from
-  prefix='' 
-    
-      # Filename of object (with path) and Etag
-  file_key_name = messageJson['key']
-  
-  print('Source Bucket:'+ source_bucket_name)
-  print('Key file: '+ file_key_name)
-  source_etag = s3_client.head_object(Bucket=source_bucket_name,Key=file_key_name)['ETag'][1:-1]  
-  print('Source Etag:'+ source_etag)
-  if "guid" in messageJson:
-   if messageJson['scanResult']=="Clean": 
-    # defining constants for CBCs
-    CBC01='cbc01'
-    CBC02='cbc02'
-    CBC03='cbc03'
-    CBC04='cbc04'
-   
-  
-    
-   
-   
-    # determining which cbc bucket the file came from
-    prefix='' 
-    #result=[]
-   
-   
-       
-    if CBC01 in source_bucket_name:
-        prefix=CBC01
-    elif  CBC02 in source_bucket_name:
-        prefix=CBC02
-    elif  CBC03 in source_bucket_name:
-        prefix=CBC03
-    elif  CBC04 in source_bucket_name:
-        prefix=CBC04        
-    else:
-        prefix='UNMATCHED'
-   
-    print('Prefix is: '+prefix)
-        # Copy Source Object
-    if(prefix != 'UNMATCHED'):
-        #connect to RDS
+    #if the message is passed by the filecopy function
+    if(messageJson['previous_function']=='filecopy'):
+        
+        #connect to database to get information needed for slack
         mydb=connectToDB(user, password, host, dbname)
-        #call the function to copy file
-        result=fileCopy(s3_client, event, destination_bucket_name)
-        resultTuple=(result['file_name'], result['file_location'], result['file_added_on'], result['file_last_processed_on'], result['file_status'], result['file_origin'], result['file_type'], result['file_action'], result['file_submitted_by'], result['updated_by'])
+        exe="SELECT * FROM "+job_table_name+" WHERE file_name="+messageJson['file_name']+" AND "+"file_added_on="+messageJson['file_added_on']
+        mydbCursor=mydb.cursor()
+        mydbCursor.execute(exe)
+        sqlresult = mydbCursor.fetchone()
+        #determine which slack channel to send the message to
+        if(sqlresult[5]=="COPY_SUCCESSFUL"):
+            file_status="copy successfully"
+        elif(sqlresult[5]=="COPY_UNSUCCESSFUL"):
+            file_status="copy unsuccessfully"
         
-        #record the copy file result 
-        excution2="INSERT INTO "+ job_table_name+" VALUES (NULL,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)" %resultTuple
-        executeDB(mydb,excution2)
-        
-        #publish message to sns topic
-        result['previous_function']="filecopy"
-        TopicArn_Success=ssm.get_parameter(Name="TopicArn_Success", WithDecryption=True).get("Parameter").get("Value")
-        TopicArn_Failure = ssm.get_parameter(Name="TopicArn_Failure", WithDecryption=True).get("Parameter").get("Value")
-        response=sns_publisher(result,TopicArn_Success,TopicArn_Failure)
-        print(response)
-        
-        
-        statusCode=200
-        message='File Processed'
-       
-    else:
-        statusCode=400
-        message='Desired CBC prefix not found'
-        
+        #construct the slack message 
+        file_name=str(sqlresult[1])
+        file_id=str(sqlresult[0])
+        file_submitted_by=str(sqlresult[9])
+        file_location=str(sqlresult[2])
+        file_added_on=str(sqlresult[3])
+        message_slack=file_name+"(Job ID: "+file_id+", CBC ID: "+file_submitted_by+") "+file_status+" to "+file_location+" at "+file_added_on
+    
+    
+    
+        #send the message to slack channel
+        data={"text": message_slack}
+        if(messageJson['file_status']=="'COPY_SUCCESSFUL'"):
+            r=http.request("POST",
+                        success, 
+                        body=json.dumps(data),
+                        headers={"Content-Type":"application/json"})
+                        
+        elif(messageJson['file_status']=="'COPY_UNSUCCESSFUL'"):
+            r=http.request("POST",
+                        failure, 
+                        body=json.dumps(data),
+                        headers={"Content-Type":"application/json"})
 
-  
- except Exception as err:
-  raise err
-  
-    #print(message)      
-
- return {
-       'statusCode': statusCode,
-       'body': json.dumps(message)
- }  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-   
- 
+    #if the message is passed by the prevalidator function
+    elif(messageJson['previous_function']=='prevalidator'):
+        #print(messageJson)
+        #connect to database to get the file name
+        #mydb=connectToDB(user, password, host, dbname)
+        #exe="SELECT * FROM "+job_table_name+" WHERE file_id="+messageJson['org_file_id']
+        #mydbCursor=mydb.cursor()
+        #mydbCursor.execute(exe)
+        #sqlresult = mydbCursor.fetchone()
+        
+        #file_name=sqlresult[1]
+        file_name=messageJson['org_file_name']
+        validation_date=messageJson['validation_date']
+        file_submitted_by=messageJson['file_submitted_by']
+        file_status="processed"
+        org_file_id=messageJson['org_file_id']
+        
+        #collect pass and fail files from the message
+        content_pass=[]
+        content_fail=[]
+        length=len(messageJson['validation_status_list'])
+        for i in range(0,length):
+            if messageJson['validation_status_list'][i]=="FILE_VALIDATION_SUCCESS":
+                content_pass.append(messageJson['full_name_list'][i])
+            elif messageJson['validation_status_list'][i]=="FILE_VALIDATION_Failure":
+                content_fail.append(messageJson['full_name_list'][i])
+        
+        #get the files that pass the validation
+        passString='NA'
+        #get the files that do not pass the validation
+        failString='NA'
+        if(len(content_pass)>0):
+            passString = ', '.join(content_pass)
+        if(len(content_fail)>0):
+            failString = ', '.join(content_fail)
+        
+        #construct the slack message 
+        message_slack=file_name+"(Job ID: "+org_file_id+" CBC ID: "+file_submitted_by+" Validation pass: "+"_" + passString+"_"+" Validation fail: "+"*"+failString+"*"+") " + "is "+file_status+" at "+validation_date
+        data={"type": "mrkdwn","text": message_slack}
+        if(len(content_fail)>0):
+            r=http.request("POST",
+                            failure, 
+                            body=json.dumps(data),
+                            headers={"Content-Type":"application/json"})
+        else:                
+            r=http.request("POST",
+                            success, 
+                            body=json.dumps(data),
+                            headers={"Content-Type":"application/json"})
+        
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Hello from Lambda!')
+    }
