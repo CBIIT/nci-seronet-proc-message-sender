@@ -88,6 +88,7 @@ def lambda_handler(event, context):
         file_submitted_by=messageJson['file_submitted_by'][1:len(messageJson['file_submitted_by'])-1]
         file_status="processed"
         org_file_id=messageJson['org_file_id']
+        error_Message=messageJson['Error_Message']
         
         #collect pass and fail files from the message
         content_pass=[]
@@ -109,7 +110,7 @@ def lambda_handler(event, context):
             failString = ', '.join(content_fail)
         
         #construct the slack message 
-        message_slack=file_name+"(Job ID: "+org_file_id+" CBC ID: "+file_submitted_by+" Validation pass: "+"_" + passString+"_"+" Validation fail: "+"*"+failString+"*"+") " + "is "+file_status+" at "+validation_date
+        message_slack=file_name+"(Job ID: "+org_file_id+" CBC ID: "+file_submitted_by+" Validation pass: "+"_" + passString+"_"+" Validation fail: "+"*"+failString+"*"+") " + "is "+file_status+" at "+validation_date+". "+error_Message
         data={"type": "mrkdwn","text": message_slack}
         if(len(content_fail)>0):
             r=http.request("POST",
