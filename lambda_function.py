@@ -139,10 +139,11 @@ def lambda_handler(event, context):
                 
                
                  
-                if(file_submitted_by == "cbc03"):
+                if(file_submitted_by in ("cbc01","cbc02","cbc03","cbc04")):
                     # Replace recipient@example.com with a "To" address. If your account 
                     # is still in the sandbox, this address must be verified.
-                    RECIPIENT = ssm.get_parameter(Name="cbc03-recipient-email", WithDecryption=True).get("Parameter").get("Value")  
+                    recipient_email_list=file_submitted_by+"-recipient-email"
+                    RECIPIENT = ssm.get_parameter(Name = recipient_email_list, WithDecryption=True).get("Parameter").get("Value")  
                     RECIPIENT_LIST = RECIPIENT.split(",")
                    
                     for recipient in RECIPIENT_LIST:
@@ -155,7 +156,6 @@ def lambda_handler(event, context):
                         eastern = dateutil.tz.gettz('US/Eastern')
                         timestampDB = datetime.datetime.now(tz=eastern).strftime('%Y-%m-%d %H:%M:%S')
                         message_sender_sentdate = timestampDB
-                        print(message_sender_sentdate)
                         message_sender_sender_email = SENDER
                         MESSAGE_SENDER_TABLE_NAME = "table_message_sender"
                         
@@ -188,7 +188,8 @@ def lambda_handler(event, context):
                                 
                         else:
                             print("Copy is unsuccessful or the previous function does not allow to send email")
-                            
+                else:
+                    print("Can not locate the recipient email list")
         except Exception as e:
                 raise e
         finally: 
