@@ -213,7 +213,7 @@ def lambda_handler(event, context):
         content_fail = []
         length = len(messageJson['validation_status_list'])
         for i in range(0,length):
-            if messageJson['validation_status_list'][i] == "FILE_VALIDATION_SUCCESS":
+            if messageJson['validation_status_list'][i] == "FILE_VALIDATION_IN_PROGRESS":
                 content_pass.append(messageJson['full_name_list'][i])
             elif messageJson['validation_status_list'][i] == "FILE_VALIDATION_FAILURE":
                 content_fail.append(messageJson['full_name_list'][i])
