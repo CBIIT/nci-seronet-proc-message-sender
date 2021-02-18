@@ -56,19 +56,20 @@ def lambda_handler(event, context):
         
         try:
                 #remove the Apostrophe('') in the input
-                file_name = messageJson['file_name'].replace("'", '')
-                file_added_on = messageJson['file_added_on'].replace("'", '')
+                file_name = messageJson['file_name']
+                file_added_on = messageJson['file_added_on']
                 #connect to database to get information needed for slack
                 mydb = connectToDB(user, password, host, dbname)
                 exe = f"SELECT * FROM {JOB_TABLE_NAME} WHERE file_name = %s AND file_added_on = %s"
-                mydbCursor=mydb.cursor(prepared=True)
+                mydbCursor=mydb.cursor(buffered=True)
                 mydbCursor.execute(exe, (file_name, file_added_on))
                 sqlresult = mydbCursor.fetchone()
                 #determine which slack channel to send the message to
+                file_status_sql = sqlresult[5]
                 
-                if(sqlresult[5] == "COPY_SUCCESSFUL"):
+                if(file_status_sql == "COPY_SUCCESSFUL" or file_status_sql == "COPY_SUCCESSFUL_DUPLICATE"):
                     file_status="copy successfully"
-                elif(sqlresult[5] == "COPY_UNSUCCESSFUL"):
+                elif(file_status_sql == "COPY_UNSUCCESSFUL" or file_status_sql == "COPY_UNSUCCESSFUL_DUPLICATE"):
                     file_status="copy unsuccessfully"
                 else:
                     print("Error: file has been processed")
@@ -76,7 +77,7 @@ def lambda_handler(event, context):
                 
                 
                 #file_status="copy successfully"#comment this line in non-prod
-                #construct the slack message 
+                #construct the slack message
                 file_id = str(sqlresult[0])
                 file_submitted_by = str(sqlresult[9])
                 file_location = str(sqlresult[2])
@@ -85,24 +86,48 @@ def lambda_handler(event, context):
                 file_added_on_date = file_added_on_list[0]
                 file_added_on_time = file_added_on_list[1]
                 file_name = str(sqlresult[1])
+                file_md5=str(sqlresult[11])
                 
+                if(file_status_sql == "COPY_SUCCESSFUL_DUPLICATE" or file_status_sql == "COPY_UNSUCCESSFUL_DUPLICATE"):
+                    exe2 = f"SELECT * FROM {JOB_TABLE_NAME} WHERE file_md5 = %s AND (file_status='COPY_SUCCESSFUL' OR file_status='FILE_Processed') "
+                    mydbCursor.execute(exe2, (file_md5,))
+                    sqlresult2 = mydbCursor.fetchall()
+                    length = len(sqlresult2)-1
+                    duplicate_file_added_on = str(sqlresult2[length][3])
+                    duplicate_file_added_on_list = duplicate_file_added_on.split(" ")
+                    duplicate_file_added_on_date = duplicate_file_added_on_list[0]
+                    duplicate_file_added_on_time = duplicate_file_added_on_list[1]
+                    
                 #send the message to slack channel
-                message_slack=f"{file_name}(Job ID: {file_id}, CBC ID: {file_submitted_by}) {file_status} to {file_location} at {file_added_on}"
+                message_slack=f"{file_name}(Job ID: {file_id}, CBC ID: {file_submitted_by}) {file_status} to {file_location} at {file_added_on}."
                 #send the message to slack channel
                 data={"text": message_slack}
-                if(file_status == "copy successfully" and messageJson['send_slack'] == "yes"):
+                if(file_status_sql == "COPY_SUCCESSFUL" and messageJson['send_slack'] == "yes"):
                     r=http.request("POST",
                                 success, 
                                 body=json.dumps(data),
                                 headers={"Content-Type":"application/json"})
-                                
-                elif(file_status == "copy successfully" and messageJson['send_slack'] == "yes"):
+                elif(file_status_sql == "COPY_SUCCESSFUL_DUPLICATE" and messageJson['send_slack'] == "yes"):
+                    message_slack=message_slack+f" The file has been found to be a duplicate of a previous submission made at {duplicate_file_added_on}."
+                    data={"text": message_slack}
+                    r=http.request("POST",
+                                success, 
+                                body=json.dumps(data),
+                                headers={"Content-Type":"application/json"})
+                elif(file_status_sql == "COPY_UNSUCCESSFUL_DUPLICATE" and messageJson['send_slack'] == "yes"):
+                    message_slack=message_slack+f" The file has been found to be a duplicate of a previous submission made at {duplicate_file_added_on}."
+                    data={"text": message_slack}
+                    r=http.request("POST",
+                                failure, 
+                                body=json.dumps(data),
+                                headers={"Content-Type":"application/json"})
+                elif(file_status_sql == "COPY_UNSUCCESSFUL" and messageJson['send_slack'] == "yes"):
                     r=http.request("POST",
                                 failure, 
                                 body=json.dumps(data),
                                 headers={"Content-Type":"application/json"})
                 else:
-                    print("previous function does not allow to send the slck notification")
+                    print("previous function does not allow to send the slack notification")
 
                 
                 
@@ -113,13 +138,22 @@ def lambda_handler(event, context):
                 # get the HTML template of the email from s3 bucket.
                 bucket_email = ssm.get_parameter(Name="bucket_email", WithDecryption=True).get("Parameter").get("Value")
                 key_email = ssm.get_parameter(Name="key_email", WithDecryption=True).get("Parameter").get("Value")
+                key_email_duplicate = ssm.get_parameter(Name="key_email_duplicate", WithDecryption=True).get("Parameter").get("Value")
                 SUBJECT = 'File Received'
-                s3_response_object = s3.get_object(Bucket=bucket_email, Key=key_email)
-                body = s3_response_object['Body'].read()
-                body = body.decode('utf-8')
-                template = Environment(loader=BaseLoader).from_string(body)
-                BODY_HTML = template.render(file_added_on_date=file_added_on_date, file_added_on_time=file_added_on_time)
                 
+                if(file_status_sql == "COPY_SUCCESSFUL"):
+                    s3_response_object = s3.get_object(Bucket=bucket_email, Key=key_email)
+                    body = s3_response_object['Body'].read()
+                    body = body.decode('utf-8')
+                    template = Environment(loader=BaseLoader).from_string(body)
+                    BODY_HTML = template.render(file_added_on_date=file_added_on_date, file_added_on_time=file_added_on_time)
+                elif(file_status_sql == "COPY_SUCCESSFUL_DUPLICATE"):
+                    s3_response_object = s3.get_object(Bucket=bucket_email, Key=key_email_duplicate)
+                    body = s3_response_object['Body'].read()
+                    body = body.decode('utf-8')
+                    template = Environment(loader=BaseLoader).from_string(body)
+                    BODY_HTML = template.render(file_added_on_date=file_added_on_date, file_added_on_time=file_added_on_time, duplicate_file_added_on_date=duplicate_file_added_on_date, duplicate_file_added_on_time=duplicate_file_added_on_time)
+                    
                 #sending the email
                 # Replace sender@example.com with your "From" address.
                 # This address must be verified with Amazon SES.
@@ -160,7 +194,7 @@ def lambda_handler(event, context):
                         MESSAGE_SENDER_TABLE_NAME = "table_message_sender"
                         
                         #if copy successfully
-                        if(file_status == "copy successfully" and messageJson['send_email'] == "yes"):
+                        if((file_status_sql == "COPY_SUCCESSFUL" or file_status_sql == "COPY_SUCCESSFUL_DUPLICATE") and messageJson['send_email'] == "yes"):
                             try:  
                                 # Try to send the message.
                                 server = smtplib.SMTP(HOST, PORT)
