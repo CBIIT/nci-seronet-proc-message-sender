@@ -111,7 +111,7 @@ def lambda_handler(event, context):
                     message_slack=message_slack+f" The file has been found to be a duplicate of a previous submission made at {duplicate_file_added_on}."
                     data={"text": message_slack}
                     r=http.request("POST",
-                                success, 
+                                failure, 
                                 body=json.dumps(data),
                                 headers={"Content-Type":"application/json"})
                 elif(file_status_sql == "COPY_UNSUCCESSFUL_DUPLICATE" and messageJson['send_slack'] == "yes"):
