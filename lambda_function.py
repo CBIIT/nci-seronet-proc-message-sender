@@ -47,12 +47,44 @@ def lambda_handler(event, context):
     success = ssm.get_parameter(Name="success_hook_url", WithDecryption=True).get("Parameter").get("Value")
     
     #get the message from the event
-    message = event['Records'][0]['Sns']['Message']
-    #print(event)
-    messageJson = json.loads(message)
+    event_trigger = event['Records'][0]["eventSource"]
+    print(event_trigger)
+    
+    if "Sns" in event_trigger:         ## event trigger is Sns
+        message = event['Records'][0]['Sns']['Message']
+        messageJson = json.loads(message)
+        trigger_type = "Sns"
+    elif "s3" in event_trigger:        ## event trigger is s3
+        bucket_name = event['Records'][0]['s3']['bucket']['name']
+        message = event['Records'][0]['s3']['object']['key']
+        print(f"## bucket: {bucket_name} \n Key_Name: {message}")
+        trigger_type = "S3"
+        
+    if  trigger_type == "S3":
+        try:
+            RECIPIENT_LIST = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
+            SUBJECT = 'Shipping Manifest Has Been Uploaded'
+            SENDERNAME = 'SeroNet Data Team (Data Curation)'
+            SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
+            msg_text = (f"A Shipping_Manifest was uploaded to {bucket_name}\n\r " + 
+                        f"The Path to the file is: {message}")
+            msg_text.replace("+", " ", inplace=True)
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = SUBJECT
+            msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
+            part1 = MIMEText(msg_text, "plain")
+            msg.attach(part1)
+            msg['To'] = RECIPIENT_LIST
+            send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(', '), msg)
+        except Exception as ex:
+            display_error_line(ex)
+        finally:
+            if 'server' in locals():
+                server.close()  # server was connected but failed, close the connection
+
 
     #if the message is passed by the filecopy function
-    if(messageJson['previous_function']=='filecopy'):
+    elif(messageJson['previous_function']=='filecopy'):
         
         try:
                 #remove the Apostrophe('') in the input
@@ -197,14 +229,7 @@ def lambda_handler(event, context):
                         if((file_status_sql == "COPY_SUCCESSFUL" or file_status_sql == "COPY_SUCCESSFUL_DUPLICATE") and messageJson['send_email'] == "yes"):
                             try:  
                                 # Try to send the message.
-                                server = smtplib.SMTP(HOST, PORT)
-                                server.ehlo()
-                                server.starttls()
-                                #stmplib docs recommend calling ehlo() before & after starttls()
-                                server.ehlo()
-                                server.login(USERNAME_SMTP, PASSWORD_SMTP)
-                                server.sendmail(SENDER, recipient, msg.as_string())
-                                server.close()
+                                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg)
                             # Display an error message if something goes wrong.
                             except Exception as e:
                                 message_sender_sent_status = "Email_Sent_Failure"
@@ -281,3 +306,27 @@ def lambda_handler(event, context):
         'statusCode': 200,
         'body': json.dumps('Hello from Lambda!')
     }
+
+
+def send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg):
+    server = smtplib.SMTP(HOST, PORT)
+    server.ehlo()
+    server.starttls()
+    #stmplib docs recommend calling ehlo() before & after starttls()
+    server.ehlo()
+    server.login(USERNAME_SMTP, PASSWORD_SMTP)
+    recipient = [i.replace('"',"") for i in recipient]
+
+    server.sendmail(SENDER, recipient, msg.as_string())
+    server.close()
+
+
+def display_error_line(ex):
+    trace = []
+    tb = ex.__traceback__
+    while tb is not None:
+        trace.append({"filename": tb.tb_frame.f_code.co_filename,
+                      "name": tb.tb_frame.f_code.co_name,
+                      "lineno": tb.tb_lineno})
+        tb = tb.tb_next
+    print(str({'type': type(ex).__name__, 'message': str(ex), 'trace': trace}))
