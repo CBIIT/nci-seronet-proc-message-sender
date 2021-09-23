@@ -11,8 +11,10 @@ from seronetdBUtilities import *
 import datetime
 import dateutil.tz
 
-
-
+import base64
+import gzip
+import logging
+import os
 
 
 def lambda_handler(event, context):
@@ -45,21 +47,26 @@ def lambda_handler(event, context):
     #set up success and failure slack cahnnel
     failure = ssm.get_parameter(Name="failure_hook_url", WithDecryption=True).get("Parameter").get("Value")
     success = ssm.get_parameter(Name="success_hook_url", WithDecryption=True).get("Parameter").get("Value")
+    error = ssm.get_parameter(Name="error_hook_url", WithDecryption=True).get("Parameter").get("Value")
     
     #get the message from the event
-    event_trigger = event['Records'][0]["eventSource"]
-    print(event_trigger)
-    
-    if "Sns" in event_trigger:         ## event trigger is Sns
-        message = event['Records'][0]['Sns']['Message']
-        messageJson = json.loads(message)
-        trigger_type = "Sns"
-    elif "s3" in event_trigger:        ## event trigger is s3
-        bucket_name = event['Records'][0]['s3']['bucket']['name']
-        message = event['Records'][0]['s3']['object']['key']
-        print(f"## bucket: {bucket_name} \n Key_Name: {message}")
-        trigger_type = "S3"
+    if 'Records' in event.keys():
+        event_trigger = event['Records'][0]["eventSource"]
+        print(event_trigger)
         
+        if "Sns" in event_trigger:         ## event trigger is Sns
+            message = event['Records'][0]['Sns']['Message']
+            messageJson = json.loads(message)
+            trigger_type = "Sns"
+        elif "s3" in event_trigger:        ## event trigger is s3
+            bucket_name = event['Records'][0]['s3']['bucket']['name']
+            message = event['Records'][0]['s3']['object']['key']
+            print(f"## bucket: {bucket_name} \n Key_Name: {message}")
+            trigger_type = "S3"    
+        
+    elif 'awslogs' in event.keys():
+        trigger_type = "cloudwatch"
+
     if  trigger_type == "S3":
         try:
             RECIPIENT_LIST = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
@@ -81,6 +88,92 @@ def lambda_handler(event, context):
         finally:
             if 'server' in locals():
                 server.close()  # server was connected but failed, close the connection
+
+
+    elif trigger_type == "cloudwatch":
+
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        def get_log_payload(event):
+            logger.setLevel(logging.DEBUG)
+            logger.debug(event['awslogs']['data'])
+            compressed_payload = base64.b64decode(event['awslogs']['data'])
+            uncompressed_payload = gzip.decompress(compressed_payload)
+            log_payload = json.loads(uncompressed_payload)
+            return log_payload
+
+        def get_error_details(payload):
+            error_msg = ""
+            log_events = payload['logEvents']
+            logger.debug(payload)
+            loggroup = payload['logGroup']
+            logstream = payload['logStream']
+            lambda_func_name = loggroup.split('/')
+            logger.debug(f'LogGroup: {loggroup}')
+            logger.debug(f'Logstream: {logstream}')
+            logger.debug(f'Function name: {lambda_func_name[3]}')
+            logger.debug(log_events)
+            for log_event in log_events:
+                error_msg += log_event['message']
+            logger.debug('Message: %s' % error_msg.split("\n"))
+            return loggroup, logstream, error_msg, lambda_func_name
+
+        def send_message_email(loggroup, logstream, error_msg, lambda_func_name):
+            RECIPIENT_LIST = ssm.get_parameter(Name="Seronet_Error_Recipients", WithDecryption=True).get("Parameter").get("Value")
+            SUBJECT = 'Seronet Lambda Errors Found: ' + str(lambda_func_name)
+            SENDERNAME = 'SeroNet Data Team (Operations)'
+            SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
+            
+            try:
+                msg_text = ""
+                msg_text += "Lambda error  summary:" + "\n\n"
+                msg_text += "LogGroup Name: " + str(loggroup) + "\n"
+                msg_text += "LogStream: " + str(logstream) + "\n"
+                msg_text += "\nLog Message:" + "\n"
+                msg_text += "\t\t" + str(error_msg.split("\n")) + "\n"
+                
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = SUBJECT
+                msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
+                part1 = MIMEText(msg_text, "plain")
+                msg.attach(part1)
+                msg['To'] = RECIPIENT_LIST
+                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(', '), msg)
+
+            except Exception as e:
+                logger.error("An error occured: %s" % e)
+                raise e
+
+        def send_message_slack(loggroup, logstream, error_msg, lambda_func_name):
+            try:
+                msg_text = ""
+                msg_text += "LogGroup Name: " + str(loggroup) + "\n"
+                msg_text += "LogStream: " + str(logstream) + "\n"
+                msg_text += "\nLog Message:" + "\n"
+                msg_text += "\t\t" + str(error_msg.split("\n")) + "\n"
+                
+                #send the message to the error slack channel
+                message_slack=f"Seronet Lambda Errors Found: \n\n {msg_text}"
+                data={"text": message_slack}
+                r=http.request("POST",
+                    error, 
+                    body=json.dumps(data),
+                    headers={"Content-Type":"application/json"})
+
+            except Exception as e:
+                logger.error("An error occured: %s" % e)
+                raise e
+
+        try:
+            payload = get_log_payload(event)
+            lgroup, lstream, errmessage, lambdaname = get_error_details(payload)
+            send_message_email(lgroup, lstream, errmessage, lambdaname)
+            send_message_slack(lgroup, lstream, errmessage, lambdaname)
+         
+        except Exception as e:
+            logger.error("An error occured: %s" % e)
+            raise e
 
 
     #if the message is passed by the filecopy function
