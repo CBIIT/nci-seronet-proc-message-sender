@@ -51,8 +51,8 @@ def lambda_handler(event, context):
     
     #get the message from the event
     if 'Records' in event.keys():
-        event_trigger = event['Records'][0]["eventSource"]
-        print(event_trigger)
+        lower_event = lower_key(event)
+        event_trigger = lower_event['records'][0]["eventsource"]
         
         if "Sns" in event_trigger:         ## event trigger is Sns
             message = event['Records'][0]['Sns']['Message']
@@ -66,7 +66,7 @@ def lambda_handler(event, context):
         
     elif 'awslogs' in event.keys():
         trigger_type = "cloudwatch"
-
+    
     if  trigger_type == "S3":
         try:
             RECIPIENT_LIST = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
@@ -423,3 +423,15 @@ def display_error_line(ex):
                       "lineno": tb.tb_lineno})
         tb = tb.tb_next
     print(str({'type': type(ex).__name__, 'message': str(ex), 'trace': trace}))
+    
+
+def lower_key(in_dict):
+    if type(in_dict) is dict:
+        out_dict = {}
+        for key, item in in_dict.items():
+            out_dict[key.lower()] = lower_key(item)
+        return out_dict
+    elif type(in_dict) is list:
+        return [lower_key(obj) for obj in in_dict]
+    else:
+        return in_dict
