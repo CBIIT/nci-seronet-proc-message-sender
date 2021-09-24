@@ -75,7 +75,7 @@ def lambda_handler(event, context):
             SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
             msg_text = (f"A Shipping_Manifest was uploaded to {bucket_name}\n\r " + 
                         f"The Path to the file is: {message}")
-            msg_text.replace("+", " ", inplace=True)
+            msg_text = msg_text.replace("+", " ")
             msg = MIMEMultipart('alternative')
             msg['Subject'] = SUBJECT
             msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
