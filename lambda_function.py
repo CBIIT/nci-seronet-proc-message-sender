@@ -47,7 +47,6 @@ def lambda_handler(event, context):
     #set up success and failure slack cahnnel
     failure = ssm.get_parameter(Name="failure_hook_url", WithDecryption=True).get("Parameter").get("Value")
     success = ssm.get_parameter(Name="success_hook_url", WithDecryption=True).get("Parameter").get("Value")
-    error = ssm.get_parameter(Name="error_hook_url", WithDecryption=True).get("Parameter").get("Value")
     
     #get the message from the event
     if 'Records' in event.keys():
@@ -92,6 +91,8 @@ def lambda_handler(event, context):
 
     elif trigger_type == "cloudwatch":
 
+        error = ssm.get_parameter(Name="error_hook_url", WithDecryption=True).get("Parameter").get("Value")
+        
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger(__name__)
         
@@ -120,7 +121,8 @@ def lambda_handler(event, context):
             return loggroup, logstream, error_msg, lambda_func_name
 
         def send_message_email(loggroup, logstream, error_msg, lambda_func_name):
-            RECIPIENT_LIST = ssm.get_parameter(Name="Seronet_Error_Recipients", WithDecryption=True).get("Parameter").get("Value")
+            RECIPIENT_LIST_RAW = ssm.get_parameter(Name="Seronet_Error_Recipients", WithDecryption=True).get("Parameter").get("Value")
+            RECIPIENT_LIST = RECIPIENT_LIST_RAW.replace(" ", "")
             SUBJECT = 'Seronet Lambda Errors Found: ' + str(lambda_func_name)
             SENDERNAME = 'SeroNet Data Team (Operations)'
             SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
@@ -139,7 +141,7 @@ def lambda_handler(event, context):
                 part1 = MIMEText(msg_text, "plain")
                 msg.attach(part1)
                 msg['To'] = RECIPIENT_LIST
-                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(', '), msg)
+                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(','), msg)
 
             except Exception as e:
                 logger.error("An error occured: %s" % e)
