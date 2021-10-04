@@ -53,7 +53,7 @@ def lambda_handler(event, context):
         lower_event = lower_key(event)
         event_trigger = lower_event['records'][0]["eventsource"]
         
-        if "Sns" in event_trigger:         ## event trigger is Sns
+        if "sns" in event_trigger:         ## event trigger is Sns
             message = event['Records'][0]['Sns']['Message']
             messageJson = json.loads(message)
             trigger_type = "Sns"
