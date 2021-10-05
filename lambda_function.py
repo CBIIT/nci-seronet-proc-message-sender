@@ -15,6 +15,7 @@ import base64
 import gzip
 import logging
 import os
+import sys
 
 
 def lambda_handler(event, context):
@@ -61,10 +62,15 @@ def lambda_handler(event, context):
             bucket_name = event['Records'][0]['s3']['bucket']['name']
             message = event['Records'][0]['s3']['object']['key']
             print(f"## bucket: {bucket_name} \n Key_Name: {message}")
-            trigger_type = "S3"    
+            trigger_type = "S3"
+        else:
+             sys.exit("Function triggered by an invalid message")
         
     elif 'awslogs' in event.keys():
         trigger_type = "cloudwatch"
+
+    else:
+        sys.exit("Function triggered by an invalid message")
     
     if  trigger_type == "S3":
         try:
