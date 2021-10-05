@@ -414,8 +414,6 @@ def lambda_handler(event, context):
 
 
 def send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg):
-    print("Sender: {}   Recipient: {}".format(SENDER, recipient))
-    
     server = smtplib.SMTP(HOST, PORT)
     server.ehlo()
     server.starttls()
