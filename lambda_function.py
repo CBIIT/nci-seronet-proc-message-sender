@@ -88,7 +88,9 @@ def lambda_handler(event, context):
             part1 = MIMEText(msg_text, "plain")
             msg.attach(part1)
             msg['To'] = RECIPIENT_LIST
-            send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(','), msg)
+            
+            for recipient in RECIPIENT_LIST:
+                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg)
         except Exception as ex:
             display_error_line(ex)
         finally:
@@ -134,7 +136,8 @@ def lambda_handler(event, context):
             SENDERNAME = 'SeroNet Data Team (Operations)'
             SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
             
-            try:
+            for recipient in RECIPIENT_LIST:
+              try:
                 msg_text = ""
                 msg_text += "Lambda error  summary:" + "\n\n"
                 msg_text += "LogGroup Name: " + str(loggroup) + "\n"
@@ -147,10 +150,10 @@ def lambda_handler(event, context):
                 msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
                 part1 = MIMEText(msg_text, "plain")
                 msg.attach(part1)
-                msg['To'] = RECIPIENT_LIST
-                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(','), msg)
+                msg['To'] = recipient
+                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg)
 
-            except Exception as e:
+              except Exception as e:
                 logger.error("An error occured: %s" % e)
                 raise e
 
@@ -411,13 +414,14 @@ def lambda_handler(event, context):
 
 
 def send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg):
+    print("Sender: {}   Recipient: {}".format(SENDER, recipient))
+    
     server = smtplib.SMTP(HOST, PORT)
     server.ehlo()
     server.starttls()
     #stmplib docs recommend calling ehlo() before & after starttls()
     server.ehlo()
     server.login(USERNAME_SMTP, PASSWORD_SMTP)
-    recipient = [i.replace('"',"") for i in recipient]
 
     server.sendmail(SENDER, recipient, msg.as_string())
     server.close()
