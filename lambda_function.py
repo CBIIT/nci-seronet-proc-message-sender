@@ -74,7 +74,8 @@ def lambda_handler(event, context):
     
     if  trigger_type == "S3":
         try:
-            RECIPIENT_LIST = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
+            RECIPIENT_LIST_RAW = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
+            RECIPIENT_LIST = RECIPIENT_LIST_RAW.replace(" ", "")
             SUBJECT = 'Shipping Manifest Has Been Uploaded'
             SENDERNAME = 'SeroNet Data Team (Data Curation)'
             SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
@@ -87,7 +88,7 @@ def lambda_handler(event, context):
             part1 = MIMEText(msg_text, "plain")
             msg.attach(part1)
             msg['To'] = RECIPIENT_LIST
-            send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(', '), msg)
+            send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, RECIPIENT_LIST.split(','), msg)
         except Exception as ex:
             display_error_line(ex)
         finally:
