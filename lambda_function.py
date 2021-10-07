@@ -74,23 +74,26 @@ def lambda_handler(event, context):
     
     if  trigger_type == "S3":
         try:
-            RECIPIENT_LIST_RAW = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
-            RECIPIENT_LIST = RECIPIENT_LIST_RAW.replace(" ", "")
+            RECIPIENT_RAW = ssm.get_parameter(Name="Shipping_Manifest_Recipents", WithDecryption=True).get("Parameter").get("Value")
+            RECIPIENT = RECIPIENT_RAW.replace(" ", "")
+            RECIPIENT_LIST = RECIPIENT.split(",")
             SUBJECT = 'Shipping Manifest Has Been Uploaded'
             SENDERNAME = 'SeroNet Data Team (Data Curation)'
             SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
-            msg_text = (f"A Shipping_Manifest was uploaded to {bucket_name}\n\r " + 
-                        f"The Path to the file is: {message}")
-            msg_text = msg_text.replace("+", " ")
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = SUBJECT
-            msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
-            part1 = MIMEText(msg_text, "plain")
-            msg.attach(part1)
-            msg['To'] = RECIPIENT_LIST
             
             for recipient in RECIPIENT_LIST:
+                msg_text = ""
+                msg_text += "A Shipping_Manifest was uploaded to " + str(bucket_name) + "\n\r" 
+                msg_text += "The Path to the file is: " + str(message)
+
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = SUBJECT
+                msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
+                part1 = MIMEText(msg_text, "plain")
+                msg.attach(part1)
+                msg['To'] = recipient
                 send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg)
+                
         except Exception as ex:
             display_error_line(ex)
         finally:
@@ -130,32 +133,33 @@ def lambda_handler(event, context):
             return loggroup, logstream, error_msg, lambda_func_name
 
         def send_message_email(loggroup, logstream, error_msg, lambda_func_name):
-            RECIPIENT_LIST_RAW = ssm.get_parameter(Name="Seronet_Error_Recipients", WithDecryption=True).get("Parameter").get("Value")
-            RECIPIENT_LIST = RECIPIENT_LIST_RAW.replace(" ", "")
+            RECIPIENT_RAW = ssm.get_parameter(Name="Seronet_Error_Recipients", WithDecryption=True).get("Parameter").get("Value")
+            RECIPIENT = RECIPIENT_RAW.replace(" ", "")
+            RECIPIENT_LIST = RECIPIENT.split(",")
             SUBJECT = 'Seronet Lambda Errors Found: ' + str(lambda_func_name)
             SENDERNAME = 'SeroNet Data Team (Operations)'
             SENDER = ssm.get_parameter(Name="sender-email", WithDecryption=True).get("Parameter").get("Value")
             
             for recipient in RECIPIENT_LIST:
-              try:
-                msg_text = ""
-                msg_text += "Lambda error  summary:" + "\n\n"
-                msg_text += "LogGroup Name: " + str(loggroup) + "\n"
-                msg_text += "LogStream: " + str(logstream) + "\n"
-                msg_text += "\nLog Message:" + "\n"
-                msg_text += "\t\t" + str(error_msg.split("\n")) + "\n"
+                try:
+                    msg_text = ""
+                    msg_text += "Lambda error  summary:" + "\n\n"
+                    msg_text += "LogGroup Name: " + str(loggroup) + "\n"
+                    msg_text += "LogStream: " + str(logstream) + "\n"
+                    msg_text += "\nLog Message:" + "\n"
+                    msg_text += "\t\t" + str(error_msg.split("\n")) + "\n"
                 
-                msg = MIMEMultipart('alternative')
-                msg['Subject'] = SUBJECT
-                msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
-                part1 = MIMEText(msg_text, "plain")
-                msg.attach(part1)
-                msg['To'] = recipient
-                send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg)
+                    msg = MIMEMultipart('alternative')
+                    msg['Subject'] = SUBJECT
+                    msg['From'] = email.utils.formataddr((SENDERNAME, SENDER))
+                    part1 = MIMEText(msg_text, "plain")
+                    msg.attach(part1)
+                    msg['To'] = recipient
+                    send_email_func(HOST, PORT, USERNAME_SMTP, PASSWORD_SMTP, SENDER, recipient, msg)
 
-              except Exception as e:
-                logger.error("An error occured: %s" % e)
-                raise e
+                except Exception as e:
+                    logger.error("An error occured: %s" % e)
+                    raise e
 
         def send_message_slack(loggroup, logstream, error_msg, lambda_func_name):
             try:
