@@ -313,6 +313,7 @@ def lambda_handler(event, context):
                 msg.attach(part1)
                 bucket_name = ssm.get_parameter(Name = "bucket_name_list", WithDecryption=True).get("Parameter").get("Value")  
                 bucket_name_list = bucket_name.split(",")
+                bucket_name_list = [s.strip() for s in bucket_name_list]
                  
                 if(file_submitted_by in bucket_name_list):
                     # Replace recipient@example.com with a "To" address. If your account 
