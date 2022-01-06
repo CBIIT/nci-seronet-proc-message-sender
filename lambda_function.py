@@ -311,16 +311,16 @@ def lambda_handler(event, context):
                 # According to RFC 2046, the last part of a multipart message, in this case
                 # the HTML message, is best and preferred.
                 msg.attach(part1)
-                
-               
+                bucket_name = ssm.get_parameter(Name = "bucket_name_list", WithDecryption=True).get("Parameter").get("Value")  
+                bucket_name_list = bucket_name.split(",")
+                bucket_name_list = [s.strip() for s in bucket_name_list]
                  
-                if(file_submitted_by in ("cbc01","cbc02","cbc03","cbc04")):
+                if(file_submitted_by in bucket_name_list):
                     # Replace recipient@example.com with a "To" address. If your account 
                     # is still in the sandbox, this address must be verified.
                     recipient_email_list=file_submitted_by+"-recipient-email"
                     RECIPIENT = ssm.get_parameter(Name = recipient_email_list, WithDecryption=True).get("Parameter").get("Value")  
                     RECIPIENT_LIST = RECIPIENT.split(",")
-                   
                     for recipient in RECIPIENT_LIST:
                         msg['To'] = recipient
                         
